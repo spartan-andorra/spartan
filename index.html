@@ -128,6 +128,7 @@ textarea{resize:vertical}
 .asalto{padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .asalto:last-child{border:0}
 .pqs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.pqf{display:flex;gap:8px;margin-top:4px}.pqf input{flex:1}.pqf .btn{flex-shrink:0}
 .keyd{list-style:none;padding:0;margin:0} .keyd li{padding:6px 0;border-bottom:1px solid var(--line)} .keyd li:last-child{border:0} .keyd b{display:inline-block;min-width:80px;color:var(--red2)}
 .et.cur{border-color:var(--ac);border-width:2px}
 .et .sc-h{padding:0}
@@ -360,7 +361,7 @@ function fmtVal(m, v) {
 function params(p, doc) {
   const o = Object.assign({}, DEF[p]);
   const L = (doc && doc.log) || {};
-  if (L['t:t1'] && typeof L['t:t1'].v === 'number') o.t5k = L['t:t1'].v;
+  if (L['t:t1'] && typeof L['t:t1'].v === 'number') o.t5k = t5kEq(L['t:t1']);
   if (L['t:t2'] && L['t:t2'].v && typeof L['t:t2'].v === 'object') {
     for (const k of ['flex', 'sent', 'dom', 'colg', 'plan', 'burp']) {
       const x = L['t:t2'].v[k];
@@ -371,13 +372,21 @@ function params(p, doc) {
   o.real = { t5k: !!L['t:t1'], fuerza: !!L['t:t2'], dp: !!L['t:t3'] };
   return o;
 }
+// Distancia distinta a la del plan: se convierte con la fórmula de Riegel (tiempo ∝ distancia^1,06).
+function t5kEq(r) { return r.km && r.km > 0 && Math.abs(r.km - 5) > 0.01 ? Math.round(r.v * Math.pow(5 / r.km, 1.06)) : r.v; }
+// Ritmo equivalente a la distancia del plan: correr más km al mismo ritmo vale más; menos km, menos.
+function effV(ses, r) {
+  if (!r || typeof r.v !== 'number') return null;
+  if (ses.m === 'pace' && r.km && ses.km && Math.abs(r.km - ses.km) > 0.01) return Math.round(r.v * Math.pow(ses.km / r.km, 0.06));
+  return r.v;
+}
 function paceP(pr, c) { return Math.round(pr.t5k / 5) - Math.min(26, 2 * (c - 1)); }
 
 /* ===== Semana de prueba ===== */
 const TESTS = ['t1', 't2', 't3'];
 const TEST_DAYS = { t1: 1, t2: 3, t3: 6 };
 function T(sid) {
-  if (sid === 't1') return { sid, n: 'Test 5 km', k: 'Prueba', mn: 40, m: 'time', tgt: null, unit: 'tiempo total (m:ss)',
+  if (sid === 't1') return { sid, n: 'Test 5 km', k: 'Prueba', mn: 40, m: 'time', tgt: null, km: 5, unit: 'tiempo total (m:ss)',
     cal: '10 min de trote muy suave + movilidad de tobillos y cadera + 3 progresivos de 80 m.',
     main: ['5 km a tope pero REGULAR: el primer km no más rápido que el resto.', 'Llano: pista, parque o cinta al 1 %.', 'Apunta el tiempo total. De aquí salen todos tus ritmos.'],
     cool: '10 min andando + estirar gemelos, cuádriceps e isquios.', eff: '9/10' };
@@ -428,12 +437,11 @@ function timeline(p, doc) {
     if (ses.tgt == null || ses.special) continue;
     const e = EXP_R[sid] || [6, 8], eff = typeof r.r === 'number' ? r.r : (e[0] + e[1]) / 2;
     if (ses.m === 'pace' || ses.m === 'rep') {
-      let d = r.v - ses.tgt;
+      let d = effV(ses, r) - ses.tgt;
       if (ses.m === 'rep') d = d / ses.repKm;
       d = clamp(d, -40, 40);
       if (d < 0 && eff > e[1] + 1) d *= 0.3;         // más rápido pero reventado: cuenta poco
       if (d > 0 && eff <= e[0] - 1) d *= 0.5;         // más lento pero muy suave: igual fue a propósito
-      if (d < 0 && r.km && ses.km && r.km < ses.km * 0.85) d = 0; // más rápido pero con menos km: no cuenta
       s.adj = clamp(s.adj + 0.35 * d, -30, 45);
       s.last = { sid, c, d: Math.round(d) };
     } else if (s.f[sid] != null && ses.m !== 'none') {
@@ -616,7 +624,7 @@ function cycleStat(p, c, doc, today) {
 function hitOf(p, c, it, doc) {
   if (it.kind !== 'plan' || it.rec.canje || typeof it.rec.v !== 'number') return null;
   const s = S(c, it.sid, p, doc);
-  return pct(s.m, s.tgt, it.rec.v);
+  return pct(s.m, s.tgt, effV(s, it.rec));
 }
 
 function score(p, doc, today) {
@@ -674,7 +682,7 @@ function asaltos(docs, today) {
       const a = docs.G && docs.G.log && docs.G.log[k], b = docs.B && docs.B.log && docs.B.log[k];
       if (!a || !b || a.canje || b.canje || typeof a.v !== 'number' || typeof b.v !== 'number') continue;
       const sa = S(c, sid, 'G', docs.G), sb = S(c, sid, 'B', docs.B);
-      const pa = pct(sa.m, sa.tgt, a.v), pb = pct(sb.m, sb.tgt, b.v);
+      const pa = pct(sa.m, sa.tgt, effV(sa, a)), pb = pct(sb.m, sb.tgt, effV(sb, b));
       out.push({ c, sid, n: sa.n, pa, pb, w: Math.abs(pa - pb) < 1e-9 ? null : pa > pb ? 'G' : 'B' });
     }
   }
@@ -1219,7 +1227,13 @@ function sessionCard(p, key, startOpen) {
   if (rec) {
     if (rec.canje) res = `<div class="res">Canjeada por <b>${esc(rec.canje.dep)}</b> · ${rec.canje.min} min · ${fd(rec.di)}</div>`;
     else if (ses.m === 'multi' && rec.v) res = `<div class="res">${multiTxt(rec.v)} · esfuerzo ${rec.r}/10</div>`;
-    else res = `<div class="res">${ses.m !== 'none' ? `<b>${fmtVal(ses.m, rec.v)}</b> ${diffTxt(ses, rec.v)} · ` : ''}${rec.km ? String(rec.km).replace('.', ',') + ' km · ' : ''}esfuerzo ${rec.r}/10 · ${fd(rec.di)}</div>`;
+    else {
+      const kmTxt = rec.km ? String(rec.km).replace('.', ',') + ' km · ' : '';
+      let eqTxt = '';
+      if (key === 't:t1' && rec.km && Math.abs(rec.km - 5) > 0.01) eqTxt = `<div class="mut sm">Equivale a <b>${fmt(t5kEq(rec))}</b> en 5 km: es la marca que se usa para tus ritmos.</div>`;
+      else if (ses.m === 'pace' && rec.km && ses.km && Math.abs(rec.km - ses.km) > 0.01) eqTxt = `<div class="mut sm">Con ${String(rec.km).replace('.', ',')} km en vez de ${String(ses.km).replace('.', ',')}, equivale a <b>${fmt(effV(ses, rec))}/km</b> ${diffTxt(ses, effV(ses, rec))}. Es lo que cuenta para ajustar.</div>`;
+      res = `<div class="res">${ses.m !== 'none' ? `<b>${fmtVal(ses.m, rec.v)}</b> ${eqTxt ? '' : diffTxt(ses, rec.v)} · ` : ''}${kmTxt}esfuerzo ${rec.r}/10 · ${fd(rec.di)}${eqTxt}</div>`;
+    }
   }
   let daySel = '';
   if (mine && a[0] === 'c' && !rec) {
@@ -1265,7 +1279,7 @@ function regForm(p, key, ses, rec) {
   if (key[0] === 't') days.splice(0, Math.max(0, days.length - 21));
   let val = '';
   if (ses.m === 'pace' || ses.m === 'rep' || ses.m === 'time') val = `<div class="fl">${ses.unit.replace(' (m:ss)', '')}${wheelHtml('v-' + key, ses.tgt != null ? ses.tgt : params(p, docs[p]).t5k)}</div>`;
-  if (ses.m === 'pace' && ses.km) val += `<label class="fl">Km que has hecho <span class="mut sm">(si no fueron ${String(ses.km).replace('.', ',')})</span><input id="km-${key}" type="number" step="0.1" min="0" inputmode="decimal" placeholder="${String(ses.km)}"></label>`;
+  if ((ses.m === 'pace' || ses.m === 'time') && ses.km) val += `<label class="fl">Km que has hecho de verdad <span class="mut sm">(déjalo vacío si fueron ${String(ses.km).replace('.', ',')})</span><input id="km-${key}" type="text" inputmode="decimal" autocomplete="off" placeholder="${String(ses.km).replace('.', ',')}"></label>`;
   else if (ses.m === 'reps' || ses.m === 'dplus') val = `<label class="fl">${ses.unit}<input id="v-${key}" type="number" min="0" inputmode="numeric" placeholder="${ses.tgt || ''}"></label>`;
   else if (ses.m === 'multi') val = `<div class="grid2">${[['flex', 'Flexiones'], ['sent', 'Sentadillas 1 min'], ['dom', 'Dominadas'], ['colg', 'Colgado (s)'], ['plan', 'Plancha (s)']].map(([k, l]) => `<label class="fl">${l}<input id="v-${key}-${k}" type="number" min="0" inputmode="numeric"></label>`).join('')}<div class="fl" style="grid-column:1/-1">30 burpees contra reloj${wheelHtml('v-' + key + '-burp', params(p, docs[p]).burp)}</div></div>`;
   return `<form class="reg" data-form="reg" data-k="${key}">
@@ -1376,7 +1390,10 @@ function pulsoView() {
       ${ETAPAS.filter(e => t >= cyStart(e.cs[0])).map(e => { const x = balanceStage('G', docs.G, e, t), y = balanceStage('B', docs.B, e, t); return `<tr><td>${e.n}. ${e.name}</td><td style="color:var(--G)">${signed(x.bal)} <span class="mut sm">(${x.ex}/${x.at})</span></td><td style="color:var(--B)">${signed(y.bal)} <span class="mut sm">(${y.ex}/${y.at})</span></td></tr>`; }).join('') || '<tr><td colspan="3" class="mut">Empieza en el ciclo 1.</td></tr>'}
     </table>`, false);
   h += acc('pl:as', 'Asaltos', `${wa} – ${wb}`, `${as.slice(-10).reverse().map(x => `<div class="asalto"><span class="mut sm">C${x.c}</span> ${x.n}<span class="fr"><span style="color:var(--G)">${pctTxt(x.pa)}</span> · <span style="color:var(--B)">${pctTxt(x.pb)}</span> ${x.w ? `<span class="dot" style="background:var(--${x.w})"></span>` : '='}</span></div>`).join('') || '<div class="mut sm">Aún sin asaltos</div>'}`, false);
-  h += acc('pl:pq', 'Picar a ' + NAMES[OTHER[st.me]], '', `<div class="pqs">${PIQUES.map((p, i) => `<button class="btn ghost sm" data-act="picar" data-v="${i}">${esc(p)}</button>`).join('')}</div>`, false);
+  h += acc('pl:pq', 'Picar a ' + NAMES[OTHER[st.me]], '', `<div class="pqs">${PIQUES.map((p, i) => `<button class="btn ghost sm" data-act="picar" data-v="${i}">${esc(p)}</button>`).join('')}</div>
+    <form class="pqf" data-form="pique"><input id="pq-txt" type="text" maxlength="140" autocomplete="off" placeholder="O escribe lo tuyo…" aria-label="Mensaje para ${NAMES[OTHER[st.me]]}"><button class="btn sm">Enviar</button></form>
+    <div class="err">${esc(st.err.pique || '')}</div>
+    <div class="mut sm">Le saldrá arriba cuando abra la web (máximo 140 caracteres).</div>`, false);
   return h;
 }
 const PIQUES = ['¿Hoy tampoco entrenas?', 'Te saco 10 puntos y bajando.', 'Esa sesión vencida huele mal.', 'En Andorra te espero arriba.', '30 burpees por cada excusa.'];
@@ -1429,7 +1446,7 @@ function marcasTable() {
   const r = (l, x, y, f, real) => `<tr><td>${l}</td><td style="color:var(--G)">${f(x)}${real[0] ? '' : '<sup>*</sup>'}</td><td style="color:var(--B)">${f(y)}${real[1] ? '' : '<sup>*</sup>'}</td></tr>`;
   const id = v => v;
   return `<table class="sc-t"><tr><th></th><th>Goncas</th><th>Borja</th></tr>
-    ${r('5 km', a.t5k, b.t5k, fmt, [a.real.t5k, b.real.t5k])}
+    ${r('5 km (equivalente)', a.t5k, b.t5k, fmt, [a.real.t5k, b.real.t5k])}
     ${r('Flexiones', a.flex, b.flex, id, [a.real.fuerza, b.real.fuerza])}${r('Sentadillas 1 min', a.sent, b.sent, id, [a.real.fuerza, b.real.fuerza])}
     ${r('Dominadas', a.dom, b.dom, id, [a.real.fuerza, b.real.fuerza])}${r('Colgado', a.colg, b.colg, v => v + ' s', [a.real.fuerza, b.real.fuerza])}
     ${r('Plancha', a.plan, b.plan, v => v + ' s', [a.real.fuerza, b.real.fuerza])}${r('30 burpees', a.burp, b.burp, fmt, [a.real.fuerza, b.real.fuerza])}
@@ -1592,6 +1609,14 @@ document.addEventListener('submit', e => {
     else { st.err.login = 'PIN incorrecto.'; render(); }
     return;
   }
+  if (kind === 'pique') {
+    const el = document.getElementById('pq-txt'), txt = el ? el.value.replace(/\s+/g, ' ').trim().slice(0, 140) : '';
+    if (!txt) { st.err.pique = 'Escribe algo antes de enviar.'; render(); return; }
+    st.err.pique = ''; if (el) el.value = '';
+    mutate(d => { d.pique = { ts: Date.now(), txt }; });
+    toast('Mensaje enviado. Lo verá al abrir la web.');
+    return;
+  }
   if (kind === 'reg') {
     const k = f.dataset.k, ses = sessionFor(st.me, k), di = +val('d-' + k), r = +val('r-' + k);
     let v = null, err = '';
@@ -1608,7 +1633,7 @@ document.addEventListener('submit', e => {
     const noteEl = document.getElementById('note-' + k); const nt = noteEl ? noteEl.value.trim().slice(0, 2000) : '';
     if (nt !== (notes[st.me + '|' + k] || '')) saveNote(st.me + '|' + k, nt);
     let km = null;
-    if (ses.m === 'pace' && ses.km) { const ks = val('km-' + k).replace(',', '.'); if (ks !== '') { km = +ks; if (!(km > 0 && km < 100)) { st.err[k] = 'Los km tienen que ser un número (por ejemplo 4,5).'; render(); return; } } }
+    if ((ses.m === 'pace' || ses.m === 'time') && ses.km) { const ks = val('km-' + k).replace(',', '.'); if (ks !== '') { km = +ks; if (!(km >= 1 && km <= 50)) { st.err[k] = 'Los km tienen que ser un número (por ejemplo 4,5).'; render(); return; } } }
     const prevAdj = timeline(st.me, docs[st.me]).final.adj;
     mutate(d => { d.log = d.log || {}; d.log[k] = km ? { di, v, r, km, ts: Date.now() } : { di, v, r, ts: Date.now() }; });
     const after = k[0] === 'c' ? cycleStat(st.me, +k.split(':')[0].slice(1), docs[st.me]) : null;
